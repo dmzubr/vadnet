@@ -7,132 +7,138 @@ Copyright (C) University of Augsburg, Lab for Human Centered Multimedia
 Returns energy of a signal (dimensionwise or overall)
 '''
 
-import sys, os, json, argparse, glob
+import os, json, glob
+import logging
 
 import tensorflow as tf
 import numpy as np
 import librosa as lr
+import subprocess
 
 
-def audio_from_file(path, sr=None, ext=''):
-    return lr.load('{}{}'.format(path, ext), sr=sr, mono=True, offset=0.0, duration=None, dtype=np.float32, res_type='kaiser_best')                
+class CNNNetVAD:
+    def __init__(self, batch_size, model_path=''):
+        self.__supported_extensions = ['wav']
+        self.logger = logging.getLogger()
+        self.batch_size = batch_size
 
+        if len(model_path) == 0:
+            model_path = './models/vad'
+            if os.path.isdir(model_path):
+                candidates = glob.glob(os.path.join(model_path, 'model.ckpt-*.meta'))
+                if candidates:
+                    candidates.sort()
+                    checkpoint_path, _ = os.path.splitext(candidates[-1])
+            else:
+                checkpoint_path = model_path
 
-def audio_to_file(path, x, sr):    
-    lr.output.write_wav(path, x.reshape(-1), sr, norm=False)   
+        self.__checkpoint_path = checkpoint_path
+        self.logger.info(f'Model path is:  {checkpoint_path}')
+        if not all([os.path.exists(checkpoint_path + x) for x in ['.data-00000-of-00001', '.index', '.meta']]):
+            self.logger.error('ERROR: could not load model')
+            raise FileNotFoundError
 
+        vocabulary_path = checkpoint_path + '.json'
+        if not os.path.exists(vocabulary_path):
+            vocabulary_path = os.path.join(os.path.dirname(checkpoint_path), 'vocab.json')
+        if not os.path.exists(vocabulary_path):
+            self.logger.error(f'ERROR: could not load vocabulary. Was trying from {vocabulary_path}')
+            raise FileNotFoundError
 
-def audio_to_frames(x, n_frame, n_step=None):    
+        # Vocab is a storage for some additional NN metadata
+        with open(vocabulary_path, 'r') as fp:
+            self.__vocab = json.load(fp)
 
-    if n_step is None:
-        n_step = n_frame
+    @staticmethod
+    def __convert_file(input_file_path, output_file_path):
+        subprocess.call(['sox',
+                         input_file_path,
+                         output_file_path])
+        assert os.path.isfile(output_file_path)
 
-    if len(x.shape) == 1:
-        x.shape = (-1,1)
+    def __audio_from_file(self, path, sr=None):
+        self.logger.debug(f'Try extract data from file: path={path}')
+        if '.wav' not in path:
+            in_file_name = os.path.basename(path).replace('.pckl', '')
+            in_file_dir = path.replace(in_file_name, '')
+            spl_name = in_file_name.split('.')
+            ext = spl_name[len(spl_name)-1]
+            out_file_name = in_file_name.replace(f'.{ext}', '.wav')
+            out_file_path = os.path.join(in_file_dir, out_file_name)
+            self.logger.debug(f'Convert "{path}" to {out_file_path}')
+            self.__convert_file(path, out_file_path)
+            os.remove(path)
+            path = out_file_path
+        return lr.load(path, sr=sr, mono=True, offset=0.0, duration=None, dtype=np.float32, res_type='kaiser_best')
 
-    n_overlap = n_frame - n_step
-    n_frames = (x.shape[0] - n_overlap) // n_step       
-    n_keep = n_frames * n_step + n_overlap
+    def __audio_to_file(self, path, x, sr):
+        lr.output.write_wav(path, x.reshape(-1), sr, norm=False)
 
-    strides = list(x.strides)
-    strides[0] = strides[1] * n_step
+    def __audio_to_frames(self, x, n_frame, n_step=None):
+        if n_step is None:
+            n_step = n_frame
 
-    return np.lib.stride_tricks.as_strided(x[0:n_keep,:], (n_frames,n_frame), strides)
+        if len(x.shape) == 1:
+            x.shape = (-1,1)
 
+        n_overlap = n_frame - n_step
+        n_frames = (x.shape[0] - n_overlap) // n_step
+        n_keep = n_frames * n_step + n_overlap
 
-def extract_voice(path, files, n_batch=256):
+        strides = list(x.strides)
+        strides[0] = strides[1] * n_step
 
-    print('load model from {}'.format(path))
+        return np.lib.stride_tricks.as_strided(x[0:n_keep,:], (n_frames,n_frame), strides)
 
-    if os.path.isdir(path):
-        candidates = glob.glob(os.path.join(path, 'model.ckpt-*.meta'))
-        if candidates:
-            candidates.sort()                
-            checkpoint_path, _ = os.path.splitext(candidates[-1])
-    else:
-        checkpoint_path = path        
+    def extract_voice(self, file):
+        if not os.path.isfile(file):
+            self.logger.error(f'Skip: [{file}] not found]')
+            raise FileNotFoundError
 
-    if not all([os.path.exists(checkpoint_path + x) for x in ['.data-00000-of-00001', '.index', '.meta']]):
-        print('ERROR: could not load model')
-        raise FileNotFoundError
+        n_batch = self.batch_size
+        checkpoint_path = self.__checkpoint_path
+        vocab = self.__vocab
 
-    vocabulary_path = checkpoint_path + '.json'
-    if not os.path.exists(vocabulary_path):
-        vocabulary_path = os.path.join(os.path.dirname(checkpoint_path), 'vocab.json')
-    if not os.path.exists(vocabulary_path):
-        print('ERROR: could not load vocabulary')
-        raise FileNotFoundError
+        graph = tf.Graph()
 
-    with open(vocabulary_path, 'r') as fp:
-        vocab = json.load(fp)
+        with graph.as_default():
 
-    graph = tf.Graph()
+            saver = tf.train.import_meta_graph(checkpoint_path + '.meta')
 
-    with graph.as_default():
+            x = graph.get_tensor_by_name(vocab['x'])
+            y = graph.get_tensor_by_name(vocab['y'])
+            init = graph.get_operation_by_name(vocab['init'])
+            logits = graph.get_tensor_by_name(vocab['logits'])
+            ph_n_shuffle = graph.get_tensor_by_name(vocab['n_shuffle'])
+            ph_n_repeat = graph.get_tensor_by_name(vocab['n_repeat'])
+            ph_n_batch = graph.get_tensor_by_name(vocab['n_batch'])
+            sr = vocab['sample_rate']
 
-        saver = tf.train.import_meta_graph(checkpoint_path + '.meta')
+            with tf.Session() as sess:
+                saver.restore(sess, checkpoint_path)
+                self.logger.debug('Start processing {}'.format(file))
 
-        x = graph.get_tensor_by_name(vocab['x'])
-        y = graph.get_tensor_by_name(vocab['y'])            
-        init = graph.get_operation_by_name(vocab['init'])
-        logits = graph.get_tensor_by_name(vocab['logits'])            
-        ph_n_shuffle = graph.get_tensor_by_name(vocab['n_shuffle'])
-        ph_n_repeat = graph.get_tensor_by_name(vocab['n_repeat'])
-        ph_n_batch = graph.get_tensor_by_name(vocab['n_batch'])
-        sr = vocab['sample_rate']
+                sound, _ = self.__audio_from_file(file, sr=sr)
+                input = self.__audio_to_frames(sound, x.shape[1])
+                labels = np.zeros((input.shape[0],), dtype=np.int32)
+                sess.run(init, feed_dict = { x : input, y : labels, ph_n_shuffle : 1, ph_n_repeat : 1, ph_n_batch : n_batch })
+                count = 0
+                n_total = input.shape[0]
+                while True:
+                    try:
+                        output = sess.run(logits)
+                        labels[count:count+output.shape[0]] = np.argmax(output, axis=1)
+                        count += output.shape[0]
+                        print('{:.2f}%\r'.format(100 * (count/n_total)), end='', flush=True)
+                    except tf.errors.OutOfRangeError:
+                        break
 
-        with tf.Session() as sess:
+                voiced_labels = [x for x in labels if x == 1]
+                self.logger.debug(f'Total labels len is: {len(labels)}')
+                self.logger.debug(f'Voiced samples is: {len(voiced_labels)}')
+                self.logger.debug(f'Other samples is: {len([x for x in labels if x == 0])}')
 
-            saver.restore(sess, checkpoint_path)
+                # noise = input[np.argwhere(labels==0),:].reshape(-1,1)
+                # speech = input[np.argwhere(labels==1),:].reshape(-1,1)
 
-            for file in files:
-
-                print('processing {}'.format(file), flush=True)
-                
-                if os.path.exists(file):                
-                    sound, _ = audio_from_file(file, sr=sr)
-                    input = audio_to_frames(sound, x.shape[1])
-                    labels = np.zeros((input.shape[0],), dtype=np.int32)
-                    sess.run(init, feed_dict = { x : input, y : labels, ph_n_shuffle : 1, ph_n_repeat : 1, ph_n_batch : n_batch })                        
-                    count = 0
-                    n_total = input.shape[0]
-                    while True:
-                        try:                    
-                            output = sess.run(logits) 
-                            labels[count:count+output.shape[0]] = np.argmax(output, axis=1)                                
-                            count += output.shape[0]
-                            print('{:.2f}%\r'.format(100 * (count/n_total)), end='', flush=True)
-                        except tf.errors.OutOfRangeError:                                                                                
-                            break                                             
-                    noise = input[np.argwhere(labels==0),:].reshape(-1,1)
-                    speech = input[np.argwhere(labels==1),:].reshape(-1,1)
-                    name, ext = os.path.splitext(file)                    
-                    audio_to_file(os.path.join(name + '.speech' + ext), speech, sr)                    
-                    audio_to_file(os.path.join(name + '.noise' + ext), noise, sr)                                        
-
-                else:
-                    print('skip [file not found]')       
-
-
-parser = argparse.ArgumentParser()
-
-parser.add_argument('--model',
-                default=r'models\vad',
-                help='path to model')  
-
-parser.add_argument('--files', 
-                nargs='+', 
-                default=[r'data\noise.wav', r'data\speech.wav'],
-                help='list of files')
-
-parser.add_argument('--n_batch', 
-                type=int,
-                default=256,
-                help='number of batches')
-
-
-if __name__ == '__main__':
-
-    args = parser.parse_args()
-
-    extract_voice(args.model, args.files, n_batch=args.n_batch)
+                return labels

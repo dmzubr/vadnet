@@ -1,0 +1,10 @@
+
+config.yml
+
+.idea/
+
+logs/
+
+__pycache__/
+
+run.log
