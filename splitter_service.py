@@ -283,7 +283,6 @@ class SplitterAMQPService:
         # logger.info('Resulting windows are')
         # logger.info(target_windows)
 
-    #def __handle_delivery(self, method_frame, header_frame, body, st):
     def __handle_delivery(self, channel, method_frame, header_frame, body):
         #self.__
         body_str = body.decode('utf-8')
@@ -331,7 +330,7 @@ class SplitterAMQPService:
 
 
 def main():
-    config_file_path = './config.yml'
+    config_file_path = '/root/vad_service/config.yml'
     listener = SplitterAMQPService(config_file_path)
     listener.run_listener()
 

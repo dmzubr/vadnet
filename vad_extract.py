@@ -23,7 +23,7 @@ class CNNNetVAD:
         self.batch_size = batch_size
 
         if len(model_path) == 0:
-            model_path = './models/vad'
+            model_path = '/root/vad_service/models/vad'
             if os.path.isdir(model_path):
                 candidates = glob.glob(os.path.join(model_path, 'model.ckpt-*.meta'))
                 if candidates:
