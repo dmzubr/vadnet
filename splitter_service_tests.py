@@ -1,41 +1,75 @@
+from windows_extractor import get_windows_from_annotated_data
+
 import os
-from datetime import datetime
-from pydub import AudioSegment
-
-from splitter_service import get_file_tokens, get_file_name_from_path
+import matplotlib.pyplot as plt
 
 
-def test_long_file_splitting():
-    file_absolute_time_start_string = '2019-06-25T12:00:00'
-    file_absolute_time_start = datetime.strptime(file_absolute_time_start_string, '%Y-%m-%dT%H:%M:%S')
-    end_datetime_list = ['2019-06-25T12:18:15', '2019-06-25T12:21:43', '2019-06-25T12:23:44', '2019-06-25T12:26:50',
-                         '2019-06-25T12:46:00', '2019-06-25T12:55:13']
-    end_timestamps_list = []
-    for end_datetime_str in end_datetime_list:
-        end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
-        end_timestamp = end_datetime - file_absolute_time_start
-        end_timestamps_list.append(end_timestamp.total_seconds())
+def test_windows_extractor_one_trsansaction():
+    # get_windows_from_annotated_data(end_timestamps_list, seconds_stamps):
+    end_timestamps_list = [600]
+    second_timestamps = []
+    first_voice_entry_index = 300
+    voiced_samples_length = 380
+    admission = 1
 
-    file_url = 'https://storage.yandexcloud.net/test-t/rigla_butirskaya_4_1.mp3'
-    windows = get_file_tokens([], end_timestamps_list, file_url, file_absolute_time_start, 300)
+    for i in range(first_voice_entry_index):
+        second_timestamps.append(0)
+    for i in range(first_voice_entry_index, first_voice_entry_index + voiced_samples_length):
+        second_timestamps.append(1)
+    for i in range(voiced_samples_length, voiced_samples_length + 100):
+        second_timestamps.append(0)
 
-    out_dir = '/home/dmzubr/Desktop/splitter/splitted/'
-    full_file_name = '/tmp/rigla_butirskaya_4_1.wav'
-    out_full_dir = os.path.join(out_dir, get_file_name_from_path(full_file_name).replace('.wav', ''))
-    if not os.path.isdir(out_full_dir):
-        os.makedirs(out_full_dir)
+    windows = get_windows_from_annotated_data(end_timestamps_list, second_timestamps)
+    assert windows[0]['StartMilliseconds'] == (first_voice_entry_index-admission) * 1000
+    assert windows[0]['EndMilliseconds'] == (first_voice_entry_index + voiced_samples_length + admission) * 1000
 
-    full_file_seg = AudioSegment.from_wav(full_file_name)
-    i = 1
-    for window in windows:
-        output_path = os.path.join(out_full_dir, 'chunk_%002d.mp3' % (i,))
-        audio_part = full_file_seg[window['StartMilliseconds']:window['EndMilliseconds']]
-        audio_part.export(output_path, format="mp3")
-        i += 1
+def test_windows_extractor_2_overlapped_ransactions():
+    # get_windows_from_annotated_data(end_timestamps_list, seconds_stamps):
+    end_timestamps_list = [600, 840]
+    second_timestamps = []
+    first_voice_entry_index = 300
+    voiced_samples_length = 380
+    admission = 1
 
-    exit(0)
+    for i in range(first_voice_entry_index):
+        second_timestamps.append(0)
+    for i in range(first_voice_entry_index, first_voice_entry_index + voiced_samples_length):
+        second_timestamps.append(1)
+    for i in range(voiced_samples_length, voiced_samples_length + 100):
+        second_timestamps.append(0)
+
+    windows = get_windows_from_annotated_data(end_timestamps_list, second_timestamps)
+    assert windows[0]['StartMilliseconds'] == (first_voice_entry_index-admission) * 1000
+    assert windows[0]['EndMilliseconds'] == (first_voice_entry_index + voiced_samples_length + admission) * 1000
 
 
-def main():
-    test_long_file_splitting()
+import ast
 
+def print_res():
+    #Y = []
+    res_dir = '/home/dmzubr/gpn/vadnet/res/'
+    with open(os.path.join(res_dir, 'cur_iter_secs') , 'r') as f:
+        data_txt = f.read().replace('[', '').replace(']', '')
+
+    # Y = ast.literal_eval(data_txt)
+    Y = [int(x) for x in data_txt.split(' ')]
+    X = []
+    for i in range(len(Y)):
+        X.append(i)
+    # spl = data_txt.split(' ')
+    #
+    # for item in spl:
+    #     Y.append(int(item))
+
+    plt.figure(figsize=(30, 5), dpi=100)
+    plt.plot(X, Y)
+    plt.ylabel('Is_Sound')
+    image_path = os.path.join(res_dir, 'out.png')
+    plt.savefig(image_path)
+
+    # print(Y)
+
+
+# test_windows_extractor_one_trsansaction()
+# test_windows_extractor_2_overlapped_ransactions()
+print_res()

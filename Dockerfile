@@ -14,4 +14,4 @@ RUN pip install librosa pyyaml pika requests pydub
 RUN mkdir /root/vad_service
 COPY . /root/vad_service
 
-ENTRYPOINT ["python", "/root/vad_service/splitter_service.py"]
+#ENTRYPOINT ["python", "/root/vad_service/splitter_service.py"]

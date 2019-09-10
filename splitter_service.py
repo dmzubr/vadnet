@@ -5,13 +5,17 @@ import requests
 import tempfile
 from datetime import datetime
 import logging
-# from pydub import AudioSegment
-from collections import deque
 import pika
 import json
 import yaml
-import uuid
+from windows_extractor import get_windows_from_annotated_data
 import vad_extract
+
+# For DEBUG purpose
+import sys
+import numpy
+numpy.set_printoptions(threshold=sys.maxsize)
+
 
 
 class Window(object):
@@ -100,8 +104,6 @@ class SplitterAMQPService:
         self.__logger.addHandler(ch)
 
     def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
-        target_windows = []
-
         # Initially we have a list of datetime values for transactions info
         # Need to transform it to relative timestamps
         end_timestamps_list = []
@@ -135,156 +137,15 @@ class SplitterAMQPService:
             self.__logger.debug(f'SUCCESS: Convert initial mp3 file to wav extension')
 
         seconds_stamps = self.__vad.extract_voice(wav_file_path)
-        logging.info(seconds_stamps)
 
-        return target_windows
+        # with open('/home/gpn//vadnet/res/cur_iter_secs', 'w') as f:
+        #     f.write(str(seconds_stamps))
+        # self.__logger.debug(f'Received VAD voice labels are: {seconds_stamps}',)
 
-        # audio, sample_rate = read_wave(wav_file_path)
-        # vad = webrtcvad.Vad(int(agressiveness))
-        # data_frames = frame_generator(assesed_frame_size, audio, sample_rate)
-        # data_frames = list(data_frames)
-        # vad_collector(sample_rate, assesed_frame_size, padding_window, vad, data_frames)
-        #
-        # target_windows = []
-        # minimal_transaction_left_part_seconds = 30
-        # left_padding_window_size = 150
-        # minimal_left_part_voiced_samples_percent = 60
-        # minimal_transaction_right_part_seconds = 20
-        # right_padding_window_size = 100
-        #
-        # for end_timestamp in end_timestamps_list:
-        #     near_frames = [x for x in data_frames if abs(end_timestamp - x.timestamp) < 0.1]
-        #     target_frame = near_frames[0]
-        #     target_frame_index = data_frames.index(target_frame)
-        #
-        #     # Go left from time of transaction end
-        #     left_shift_seconds = 400
-        #     left_edge_frame = near_frames[0]
-        #     left_index_shift = 0
-        #
-        #     overlapped_transactions = [x for x in end_timestamps_list if
-        #                                x < target_frame.timestamp and x > target_frame.timestamp - left_shift_seconds]
-        #     if len(overlapped_transactions) > 0:
-        #         left_shift_seconds = overlapped_transactions[
-        #                                  len(overlapped_transactions) - 1] + minimal_transaction_right_part_seconds
-        #         logger.debug(
-        #             f'There is a transaction in left padding of current transaction. So move left to {left_shift_seconds}s')
-        #         left_edge_frame = [x for x in data_frames if abs(x.timestamp - left_shift_seconds) < 0.1][0]
-        #         left_edge_frame_current_index = data_frames.index(left_edge_frame)
-        #         left_index_shift = target_frame_index - left_edge_frame_current_index
-        #     else:
-        #         while target_frame.timestamp - left_edge_frame.timestamp < left_shift_seconds:
-        #             if left_edge_frame.timestamp == 0:
-        #                 left_index_shift -= 1
-        #                 break
-        #             left_edge_frame = data_frames[target_frame_index - left_index_shift]
-        #             left_index_shift += 1
-        #
-        #     logger.debug(f'Initial left edge frame is on timestamp {left_edge_frame.timestamp}')
-        #     logger.debug(f'Go to right to find empty (without voice) frames')
-        #
-        #     left_append_queue = deque(maxlen=left_padding_window_size)
-        #
-        #     while target_frame.timestamp > left_edge_frame.timestamp:
-        #         left_edge_frame = data_frames[target_frame_index - left_index_shift]
-        #
-        #         #  Fill queue with current frame
-        #         left_append_queue.append(left_edge_frame)
-        #
-        #         if len(left_append_queue) == left_padding_window_size:
-        #             # Check do not we already go too far right. Because there is a minimal left padding
-        #             if left_edge_frame.timestamp > data_frames[
-        #                 target_frame_index].timestamp - minimal_transaction_left_part_seconds:
-        #                 break
-        #
-        #             # Check - do we need to stop moving right.
-        #             # We should stop if see that current window state has enough voiced samples
-        #             voiced_frames_count = len([x for x in left_append_queue if x.is_voiced])
-        #             percentage_of_voiced_samples = voiced_frames_count / len(left_append_queue) * 100
-        #             if percentage_of_voiced_samples > minimal_left_part_voiced_samples_percent:
-        #                 break
-        #
-        #         left_index_shift -= 1
-        #
-        #     # right from time of transaction end
-        #     maximal_inner_transaction_right_silence_frames_count = 35
-        #     minimal_right_part_voiced_samples_percent = 60
-        #     right_shift_seconds = 100
-        #     right_edge_frame = near_frames[0]
-        #     right_index_shift = 0
-        #
-        #     overlapped_transactions = [x for x in end_timestamps_list if
-        #                                x > target_frame.timestamp and x < target_frame.timestamp + right_shift_seconds]
-        #     if len(overlapped_transactions) > 0 and (overlapped_transactions[0] - target_frame.timestamp > 1):
-        #         right_shift_seconds = overlapped_transactions[
-        #                                   len(overlapped_transactions) - 1] - minimal_transaction_left_part_seconds
-        #         logger.debug(
-        #             f'There is a transaction in right padding of current transaction. So move right to {right_shift_seconds}s')
-        #         right_edge_frame = [x for x in data_frames if abs(x.timestamp - right_shift_seconds) < 0.1][0]
-        #         right_edge_frame_current_index = data_frames.index(right_edge_frame)
-        #         right_index_shift = target_frame_index + right_edge_frame_current_index
-        #     else:
-        #         while right_edge_frame.timestamp - target_frame.timestamp < right_shift_seconds:
-        #             if right_edge_frame.timestamp == 0:
-        #                 right_index_shift += 1
-        #                 break
-        #             right_edge_frame = data_frames[target_frame_index + right_index_shift]
-        #             right_index_shift += 1
-        #
-        #     logger.debug(f'Initial right edge frame is on timestamp {right_edge_frame.timestamp}')
-        #     logger.debug(f'Go to left to find empty (without voice) frames')
-        #
-        #     right_append_queue = deque(maxlen=right_padding_window_size)
-        #
-        #     while right_edge_frame.timestamp > target_frame.timestamp:
-        #         right_edge_frame = data_frames[target_frame_index + right_index_shift]
-        #
-        #         #  Fill queue with current frame
-        #         right_append_queue.append(right_edge_frame)
-        #
-        #         if len(right_append_queue) == right_padding_window_size:
-        #             # Check do not we already go too far left. Because there is a minimal right padding
-        #             if right_edge_frame.timestamp < data_frames[
-        #                 target_frame_index].timestamp + minimal_transaction_right_part_seconds:
-        #                 break
-        #
-        #             # Check - do we need to stop moving left.
-        #             # We should stop if see that current window state has enough voiced samples
-        #             voiced_frames_count = len([x for x in right_append_queue if x.is_voiced])
-        #             percentage_of_voiced_samples = voiced_frames_count / len(left_append_queue) * 100
-        #             if percentage_of_voiced_samples > minimal_right_part_voiced_samples_percent:
-        #                 break
-        #
-        #         right_index_shift -= 1
-        #
-        #     resulting_left_edge_stamp = data_frames[
-        #         target_frame_index - left_index_shift - left_padding_window_size].timestamp
-        #     logger.debug(f'Resulting left edge timestamp is: {resulting_left_edge_stamp}')
-        #
-        #     resulting_right_edge_stamp = data_frames[
-        #         target_frame_index + right_index_shift + right_padding_window_size].timestamp
-        #     # resulting_right_edge_stamp = target_frame.timestamp + minimal_transaction_right_part_seconds
-        #     logger.debug(f'Resulting right edge timestamp is: {resulting_right_edge_stamp}')
-        #
-        #     window = {
-        #         'StartMilliseconds': int(resulting_left_edge_stamp * 1000),
-        #         'EndMilliseconds': int(resulting_right_edge_stamp * 1000)
-        #     }
-        #     target_windows.append(window)
-        #
-        # logger.debug('Ensure that chunks does not have overlaps')
-        # for i in range(0, len(target_windows)):
-        #     if i < len(target_windows) - 1:
-        #         window = target_windows[i]
-        #         next_window = target_windows[i + 1]
-        #         if next_window['StartMilliseconds'] < window['EndMilliseconds']:
-        #             window['EndMilliseconds'] = next_window['StartMilliseconds']
-        #
-        # logger.info('Resulting windows are')
-        # logger.info(target_windows)
+        res = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+        return res
 
     def __handle_delivery(self, channel, method_frame, header_frame, body):
-        #self.__
         body_str = body.decode('utf-8')
         self.__logger.info('Got new splitting request: ', body_str)
         req = json.loads(body_str)
