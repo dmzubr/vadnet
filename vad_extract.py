@@ -138,7 +138,9 @@ class CNNNetVAD:
                 self.logger.debug(f'Voiced samples is: {len(voiced_labels)}')
                 self.logger.debug(f'Other samples is: {len([x for x in labels if x == 0])}')
 
-                # noise = input[np.argwhere(labels==0),:].reshape(-1,1)
-                # speech = input[np.argwhere(labels==1),:].reshape(-1,1)
+                noise = input[np.argwhere(labels==0),:].reshape(-1,1)
+                speech = input[np.argwhere(labels==1),:].reshape(-1,1)
+                self.__audio_to_file('/home/gpn/vadnet/res/out.speech.wav', speech, sr)
+                self.__audio_to_file('/home/gpn/vadnet/res/out.noise.wav', noise, sr)
 
                 return labels

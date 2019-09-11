@@ -138,11 +138,10 @@ class SplitterAMQPService:
 
         seconds_stamps = self.__vad.extract_voice(wav_file_path)
 
-        # with open('/home/gpn//vadnet/res/cur_iter_secs', 'w') as f:
-        #     f.write(str(seconds_stamps))
-        # self.__logger.debug(f'Received VAD voice labels are: {seconds_stamps}',)
-
-        res = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+        time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+        res = {}
+        res['Tokens'] = time_windows
+        res['SecondsVADLabels'] = seconds_stamps.tolist()
         return res
 
     def __handle_delivery(self, channel, method_frame, header_frame, body):
@@ -151,16 +150,16 @@ class SplitterAMQPService:
         req = json.loads(body_str)
         self.__channel.basic_ack(delivery_tag=method_frame.delivery_tag)
 
-        windows_list = self.__get_file_tokens(
+        res_obj = self.__get_file_tokens(
             start_timestamps_list=req['StartTimeStampsList'],
             end_datetime_list=req['EndTimeStampsList'],
             file_url=req['FileUrl'],
             file_absolute_time_start=req['FileAbsoluteStartDate'])
 
-        self.__push_message(header_frame.reply_to, header_frame.correlation_id, windows_list)
+        self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
 
-    def __push_message(self, reply_ro_key, correlation_id, windows_list):
-        res = {'Tokens': windows_list}
+    def __push_message(self, reply_ro_key, correlation_id, res_obj):
+        res = res_obj
         body = json.dumps(res)
         msg_type = 'Loyalty.Audio.VAD.VADResponse, Loyalty.Audio.VAD'
         props = pika.BasicProperties(correlation_id=correlation_id, type=msg_type)
