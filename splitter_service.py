@@ -104,15 +104,6 @@ class SplitterAMQPService:
         self.__logger.addHandler(ch)
 
     def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
-        # Initially we have a list of datetime values for transactions info
-        # Need to transform it to relative timestamps
-        end_timestamps_list = []
-        file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
-        for end_datetime_str in end_datetime_list:
-            end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
-            end_timestamp = end_datetime - file_absolute_time_start_dte
-            end_timestamps_list.append(end_timestamp.total_seconds())
-
         # Load file from url
         long_file_name = get_file_name_from_url(file_url)
         long_file_path = os.path.join(tempfile.gettempdir(), long_file_name)
@@ -128,8 +119,8 @@ class SplitterAMQPService:
             self.__logger.debug(
                 f'TRY: Convert initial mp3 file to wav extension ("{long_file_path}" -> "{wav_file_path}")')
             process = subprocess.Popen(["sox",
-                             long_file_path,
-                             wav_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                        long_file_path,
+                                        wav_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
             logging.debug(stdout.decode('utf-8'))
             logging.debug(stderr.decode('utf-8'))
@@ -138,7 +129,19 @@ class SplitterAMQPService:
 
         seconds_stamps = self.__vad.extract_voice(wav_file_path)
 
-        time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+        # Initially we have a list of datetime values for transactions info
+        # Need to transform it to relative timestamps
+        time_windows = []
+        end_timestamps_list = []
+        if end_datetime_list is not None and len(end_datetime_list) > 0:
+            file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
+            for end_datetime_str in end_datetime_list:
+                end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
+                end_timestamp = end_datetime - file_absolute_time_start_dte
+                end_timestamps_list.append(end_timestamp.total_seconds())
+
+            time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+
         res = {}
         res['Tokens'] = time_windows
         res['SecondsVADLabels'] = seconds_stamps.tolist()
