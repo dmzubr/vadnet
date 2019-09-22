@@ -106,6 +106,9 @@ class SplitterAMQPService:
     def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
         # Load file from url
         long_file_name = get_file_name_from_url(file_url)
+        question_mark_index = long_file_name.find('?')
+        if question_mark_index > -1:
+            long_file_name = long_file_name[0:question_mark_index]
         long_file_path = os.path.join(tempfile.gettempdir(), long_file_name)
         if not os.path.exists(long_file_path):
             self.__logger.debug(f'TRY: Save initial file to {long_file_path}')
@@ -153,21 +156,25 @@ class SplitterAMQPService:
         req = json.loads(body_str)
         self.__channel.basic_ack(delivery_tag=method_frame.delivery_tag)
 
-        res_obj = self.__get_file_tokens(
-            start_timestamps_list=req['StartTimeStampsList'],
-            end_datetime_list=req['EndTimeStampsList'],
-            file_url=req['FileUrl'],
-            file_absolute_time_start=req['FileAbsoluteStartDate'])
+        try:
+            res_obj = self.__get_file_tokens(
+                start_timestamps_list=req['StartTimeStampsList'],
+                end_datetime_list=req['EndTimeStampsList'],
+                file_url=req['FileUrl'],
+                file_absolute_time_start=req['FileAbsoluteStartDate'])
+            self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
+        except Exception as exc:
+            self.__logger.error(exc)
+            excres_obj = {'ErrorMessage': str(exc)}
+            self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
 
-        self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
-
-    def __push_message(self, reply_ro_key, correlation_id, res_obj):
+    def __push_message(self, reply_to_key, correlation_id, res_obj):
         res = res_obj
         body = json.dumps(res)
         msg_type = 'Loyalty.Audio.VAD.VADResponse, Loyalty.Audio.VAD'
         props = pika.BasicProperties(correlation_id=correlation_id, type=msg_type)
-        self.__logger.debug(f'Publish message to queue {reply_ro_key}. Body: {body}')
-        self.__channel.basic_publish(exchange=self.__exchange_name, routing_key=reply_ro_key, body=body, properties=props)
+        self.__logger.debug(f'Publish message to queue {reply_to_key}. Body: {body}')
+        self.__channel.basic_publish(exchange=self.__exchange_name, routing_key=reply_to_key, body=body, properties=props)
 
     def run_listener(self):
         self.__logger.debug(f'Connecting to AMQP server with username {self.__user_name}')
@@ -193,7 +200,8 @@ class SplitterAMQPService:
 
 
 def main():
-    config_file_path = '/root/vad_service/config.yml'
+    # config_file_path = '/root/vad_service/config.yml'
+    config_file_path = 'config.yml'
     listener = SplitterAMQPService(config_file_path)
     listener.run_listener()
 
