@@ -116,6 +116,7 @@ class SplitterAMQPService:
             self.__logger.debug(f'SUCCESS: Initial file saved to {long_file_path}')
 
         # Convert file to wav extension
+        target_sample_rate = 44100
         wav_file_name = get_file_name_from_path(long_file_path).replace('.mp3', '.wav')
         wav_file_path = os.path.join(tempfile.gettempdir(), wav_file_name)
         if not os.path.isfile(wav_file_path):
@@ -123,6 +124,8 @@ class SplitterAMQPService:
                 f'TRY: Convert initial mp3 file to wav extension ("{long_file_path}" -> "{wav_file_path}")')
             process = subprocess.Popen(["sox",
                                         long_file_path,
+                                        '-r',
+                                        str(target_sample_rate),
                                         wav_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
             logging.debug(stdout.decode('utf-8'))
@@ -177,26 +180,29 @@ class SplitterAMQPService:
         self.__channel.basic_publish(exchange=self.__exchange_name, routing_key=reply_to_key, body=body, properties=props)
 
     def run_listener(self):
-        self.__logger.debug(f'Connecting to AMQP server with username {self.__user_name}')
-        credentials = pika.PlainCredentials(self.__user_name, self.__password)
-        parameters = pika.ConnectionParameters(host=self.__amqp_host, credentials=credentials)
-        connection = pika.BlockingConnection(parameters)
-
-        self.__channel = connection.channel()
-        self.__logger.debug(f'Channel created top host {self.__amqp_host}')
-
-        self.__channel.queue_declare(queue=self.__in_queue_name, durable=True, exclusive=False, auto_delete=False)
-        self.__channel.queue_bind(queue=self.__in_queue_name, exchange=self.__exchange_name, routing_key=self.__in_queue_name)
-        self.__logger.debug(f'Exchange is "{self.__exchange_name}". Queue is "{self.__in_queue_name}'"")
-        self.__channel.basic_consume(queue=self.__in_queue_name, on_message_callback=self.__handle_delivery)
-
         try:
+            self.__logger.debug(f'Connecting to AMQP server with username {self.__user_name}')
+            credentials = pika.PlainCredentials(self.__user_name, self.__password)
+            parameters = pika.ConnectionParameters(host=self.__amqp_host, credentials=credentials)
+            connection = pika.BlockingConnection(parameters)
+
+            self.__channel = connection.channel()
+            self.__logger.debug(f'Channel created top host {self.__amqp_host}')
+
+            self.__channel.queue_declare(queue=self.__in_queue_name, durable=True, exclusive=False, auto_delete=False)
+            self.__channel.queue_bind(queue=self.__in_queue_name, exchange=self.__exchange_name, routing_key=self.__in_queue_name)
+            self.__logger.debug(f'Exchange is "{self.__exchange_name}". Queue is "{self.__in_queue_name}'"")
+            self.__channel.basic_consume(queue=self.__in_queue_name, on_message_callback=self.__handle_delivery)
+
             self.__logger.debug(f'Activate blocking listening for queue {self.__in_queue_name}')
             self.__channel.start_consuming()
         except KeyboardInterrupt:
             self.__channel.stop_consuming()
             connection.close()
             connection.ioloop.stop()
+        except Exception as e:
+            self.__logger.error(e)
+            self.run_listener()
 
 
 def main():
