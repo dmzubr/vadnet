@@ -16,7 +16,8 @@ def anno_from_file(path, n, sr, ext=''):
     
     labels = np.zeros((n,), dtype=np.int32)
 
-    with open('{}{}~'.format(path, ext), newline='') as fp:
+    # with open('{}{}~'.format(path, ext), newline='') as fp:
+    with open('{}{}'.format(path, ext), newline='') as fp:
         rows = csv.reader(fp, delimiter=';')      
         for row in rows:
             start = int(round(float(row[0]) * sr))
@@ -35,7 +36,8 @@ def anno_to_file(path, labels, sr):
     onset = 0
     count = 0
 
-    with open('{}~'.format(path), 'w', encoding='latin-1') as fp:        
+    # with open('{}~'.format(path), 'w', encoding='latin-1') as fp:
+    with open('{}'.format(path), 'w', encoding='latin-1') as fp:
 
         for i in range(len(labels)):    
             if in_label and labels[i] == 0:                  
@@ -132,6 +134,11 @@ def sample_from_file(path, sr, n_frame, n_step, audio_ext='.m4a', anno_ext='.ann
 
     audio_path = '{}{}'.format(path, audio_ext)
     anno_path = '{}{}'.format(path, anno_ext)
+    # print(f'Try find file "{audio_path}"')
+    # print(f'Try find file "{anno_path}"')
+
+    # print(f'os.path.exists(audio_path): {os.path.exists(audio_path)}')
+    # print(f'os.path.exists(anno_path): {os.path.exists(anno_path)}')
 
     if not os.path.exists(audio_path) or not os.path.exists(anno_path):
         print_err('file not found {}[{},{}]'.format(path, audio_ext, anno_ext))

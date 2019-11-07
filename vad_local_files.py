@@ -3,15 +3,16 @@ import subprocess
 
 import tqdm
 from pydub import AudioSegment
-# from vad_extract_outer import CNNNetVAD
+from vad_extract_outer import CNNNetVAD
 
 
-VAD_SAMPLE_RATE = 44100
+VAD_SAMPLE_RATE = 48000
+BATCH_SIZE = 512
 
 
-in_files_dir = '/home/gpn/gpn_production_check/src/'
+in_files_dir = '/home/gpn/vadnet_train/check/in'
+out_dir = '/home/gpn/vadnet_train/check/out'
 tmp_dir_path = '/home/gpn/gpn_production_check/temp/'
-out_dir = '/home/dmzubr/gpn/gpn_production_check/speech/'
 
 
 def perform_vad_detection():
@@ -23,7 +24,7 @@ def perform_vad_detection():
     #     'device-1_20190924-194700.mp3'
     # ]
 
-    # vad = CNNNetVAD(256)
+    vad = CNNNetVAD(BATCH_SIZE)
 
     handled_files_list = []
 
@@ -36,9 +37,13 @@ def perform_vad_detection():
         wav_in_file_path = os.path.join(tmp_dir_path, file_to_vad.replace('.mp3', '.wav'))
         vad_out_wav_name = file_to_vad.replace('.mp3', '') + '_speech.wav'
         vad_out_mp3_name = file_to_vad.replace('.mp3', '') + '_speech.mp3'
-        vad_out_path = os.path.join(tmp_dir_path, vad_out_wav_name)
+        vad_out_path = os.path.join(out_dir, vad_out_wav_name)
 
-        if not os.path.isfile(vad_out_mp3_name):
+        noise_out_wav_name = file_to_vad.replace('.mp3', '') + '_noise.wav'
+        noise_out_mp3_name = file_to_vad.replace('.mp3', '') + '_noise.mp3'
+        noise_out_path = os.path.join(out_dir, noise_out_wav_name)
+
+        if not os.path.isfile(vad_out_wav_name):
             # Transform mp3 file to wav with target sample rate
             process = subprocess.Popen(["sox",
                 full_in_path,
@@ -48,18 +53,26 @@ def perform_vad_detection():
             stdout, stderr = process.communicate()
 
             # Call VAD
-            vad.extract_voice(wav_in_file_path, vad_out_path)
+            vad.extract_voice(wav_in_file_path, vad_out_path, noise_out_path)
             assert os.path.isfile(vad_out_path)
 
             # Transform speech file to mp3 format
             speech_mp3_file_path = os.path.join(out_dir, vad_out_mp3_name)
+            noise_mp3_file_path = os.path.join(out_dir, noise_out_mp3_name)
+
             process = subprocess.Popen(["sox",
                                         vad_out_path,
                                         speech_mp3_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = process.communicate()
 
-            os.remove(wav_in_file_path)
-            os.remove(vad_out_path)
+            process = subprocess.Popen(["sox",
+                                        noise_out_path,
+                                        noise_mp3_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = process.communicate()
+
+            # os.remove(wav_in_file_path)
+            # os.remove(vad_out_path)
+            # os.remove(noise_out_path)
 
         handled_files_list.append(vad_out_mp3_name)
 
@@ -80,4 +93,5 @@ def calculate_total_time():
     print(f'Bad files are {bad_files}s')
 
 
-calculate_total_time()
+perform_vad_detection()
+#calculate_total_time()
