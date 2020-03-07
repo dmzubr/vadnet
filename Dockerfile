@@ -5,7 +5,7 @@
 # librosa pyyaml pika requests pydub              	(pip)
 # ==================================================================
 
-FROM tensorflow/tensorflow:latest-gpu-py3
+FROM tensorflow/tensorflow:1.15.2-gpu-py3
 
 RUN apt update
 RUN apt install -y ffmpeg libsndfile1 sox libsox-fmt-all

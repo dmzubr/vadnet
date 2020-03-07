@@ -1,5 +1,6 @@
 import ntpath
 import os
+import traceback
 import subprocess
 import requests
 import tempfile
@@ -76,8 +77,11 @@ class SplitterAMQPService:
         self.__in_queue_name = 'Loyalty.Audio.VAD.VADRequest, Loyalty.Audio.VAD'
         self.__exchange_name = config['exchange_name']  # 'easy_net_q_rpc'
         self.__amqp_host = config['amqp_host']
+        self.__amqp_port = config['port']
         self.__user_name = config['user_name']
         self.__password = config['password']
+
+        self.__vad_labels_only = config['vad_labels_only']
 
         # Init VAD nn service
         self.__vad = vad_extract.CNNNetVAD(256)
@@ -138,15 +142,16 @@ class SplitterAMQPService:
         # Initially we have a list of datetime values for transactions info
         # Need to transform it to relative timestamps
         time_windows = []
-        end_timestamps_list = []
-        if end_datetime_list is not None and len(end_datetime_list) > 0:
-            file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
-            for end_datetime_str in end_datetime_list:
-                end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
-                end_timestamp = end_datetime - file_absolute_time_start_dte
-                end_timestamps_list.append(end_timestamp.total_seconds())
+        if not (self.__vad_labels_only):
+            end_timestamps_list = []
+            if end_datetime_list is not None and len(end_datetime_list) > 0:
+                file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
+                for end_datetime_str in end_datetime_list:
+                    end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
+                    end_timestamp = end_datetime - file_absolute_time_start_dte
+                    end_timestamps_list.append(end_timestamp.total_seconds())
 
-            time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
+                time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
 
         res = {}
         res['Tokens'] = time_windows
@@ -167,8 +172,11 @@ class SplitterAMQPService:
                 file_absolute_time_start=req['FileAbsoluteStartDate'])
             self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
         except Exception as exc:
-            self.__logger.error(exc)
-            excres_obj = {'ErrorMessage': str(exc)}
+            str_exc = str(exc)
+            tb = traceback.format_exc()
+            str_exc += '\n' + tb
+            self.__logger.error(str_exc)
+            res_obj = {'ErrorMessage': str_exc}
             self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
 
     def __push_message(self, reply_to_key, correlation_id, res_obj):
@@ -183,7 +191,7 @@ class SplitterAMQPService:
         try:
             self.__logger.debug(f'Connecting to AMQP server with username {self.__user_name}')
             credentials = pika.PlainCredentials(self.__user_name, self.__password)
-            parameters = pika.ConnectionParameters(host=self.__amqp_host, credentials=credentials)
+            parameters = pika.ConnectionParameters(host=self.__amqp_host, port=self.__amqp_port,  credentials=credentials)
             connection = pika.BlockingConnection(parameters)
 
             self.__channel = connection.channel()
@@ -206,9 +214,9 @@ class SplitterAMQPService:
 
 
 def main():
-    # config_file_path = '/root/vad_service/config.yml'
     config_file_path = 'config.yml'
     listener = SplitterAMQPService(config_file_path)
+    print(f'Activating AMQP listener service')
     listener.run_listener()
 
 

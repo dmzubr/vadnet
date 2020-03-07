@@ -1,0 +1,6 @@
+exchange_name: easy_net_q_rpc
+amqp_host: host.com
+port: 99999
+user_name: someuser
+password: somepassword
+vad_labels_only: true
