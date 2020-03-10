@@ -84,7 +84,8 @@ class SplitterAMQPService:
         self.__vad_labels_only = config['vad_labels_only']
 
         # Init VAD nn service
-        self.__vad = vad_extract.CNNNetVAD(256)
+        vad_batch_size = config['vad_batch_size']
+        self.__vad_manager = vad_extract.CNNNetVadExecutor(vad_batch_size)
 
     def __init_logger(self):
         logging.getLogger('pika').setLevel(logging.WARNING)
@@ -137,7 +138,7 @@ class SplitterAMQPService:
             assert os.path.isfile(wav_file_path)
             self.__logger.debug(f'SUCCESS: Convert initial mp3 file to wav extension')
 
-        seconds_stamps = self.__vad.extract_voice(wav_file_path)
+        seconds_stamps = self.__vad_manager.extract_voice(wav_file_path)
 
         # Initially we have a list of datetime values for transactions info
         # Need to transform it to relative timestamps

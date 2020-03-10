@@ -14,6 +14,31 @@ import tensorflow as tf
 import numpy as np
 import librosa as lr
 import subprocess
+import pickle
+
+from multiprocessing import Pool
+
+
+def exec(file_path, cnn_batch_size):
+    vadnet = CNNNetVAD(cnn_batch_size)
+    vadnet.process(file_path)
+
+
+class CNNNetVadExecutor:
+    def __init__(self, cnn_batch_size):
+        self.__cnn_batch_size = cnn_batch_size
+        pass
+
+    def extract_voice(self, file_path):
+        # https://github.com/tensorflow/tensorflow/issues/17048#issuecomment-368082470
+        with Pool(1) as p:
+            p.apply(exec, args=(file_path, self.__cnn_batch_size))
+
+        assert os.path.isfile('vad_response.pickle')
+        with open('vad_response.pickle', 'rb') as res_file_handle:
+            res = pickle.load(res_file_handle)
+
+        return res
 
 
 class CNNNetVAD:
@@ -90,7 +115,7 @@ class CNNNetVAD:
 
         return np.lib.stride_tricks.as_strided(x[0:n_keep,:], (n_frames,n_frame), strides)
 
-    def extract_voice(self, file):
+    def process(self, file):
         if not os.path.isfile(file):
             self.logger.error(f'Skip: [{file}] not found]')
             raise FileNotFoundError
@@ -100,6 +125,8 @@ class CNNNetVAD:
         vocab = self.__vocab
 
         graph = tf.Graph()
+
+        labels = None
 
         with graph.as_default():
 
@@ -133,7 +160,7 @@ class CNNNetVAD:
                     except tf.errors.OutOfRangeError:
                         break
 
-                voiced_labels = [x for x in labels if x == 1]
+                # voiced_labels = [x for x in labels if x == 1]
                 self.logger.info(f'VAD labels are:')
                 self.logger.info(labels)
                 # self.logger.debug(f'Total labels len is: {len(labels)}')
@@ -145,4 +172,9 @@ class CNNNetVAD:
                 # self.__audio_to_file('/home/gpn/vadnet/res/out.speech.wav', speech, sr)
                 # self.__audio_to_file('/home/gpn/vadnet/res/out.noise.wav', noise, sr)
 
-                return labels
+                sess.close()
+
+        # Save inference result to pickle file.
+        # Don't return results directly, because this is executed in subprocess
+        with open('vad_response.pickle', 'wb') as res_file_handle:
+            pickle.dump(labels, res_file_handle)

@@ -4,3 +4,4 @@ port: 99999
 user_name: someuser
 password: somepassword
 vad_labels_only: true
+vad_batch_size: 256

@@ -1,7 +1,10 @@
 from windows_extractor import get_windows_from_annotated_data
 
 import os
-import matplotlib.pyplot as plt
+import logging
+# import matplotlib.pyplot as plt
+
+from vad_extract import CNNNetVAD, CNNNetVadExecutor
 
 
 def test_windows_extractor_one_trsansaction():
@@ -69,7 +72,34 @@ def print_res():
 
     # print(Y)
 
+def test_vad_CNN():
+    # fh = logging.FileHandler(f'./logs/audio_splitter-{now.strftime("%Y%m%d")}.log')
+    # fh.setLevel(logging.DEBUG)
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    #fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
+
+    # vadnet = CNNNetVAD(256)
+    executor = CNNNetVadExecutor(256)
+
+    file_path = '/tmp/588c32b9-22ea-46a6-bba5-3bf32b3835bc_long-track-splitted-f2d3f9a0-95ed-498b-84ad-a4e59d1e2ce4_part_3..wav'
+    voiced_labels = executor.extract_voice(file_path)
+    # voiced_labels = vadnet.extract_voice(file_path)
+    print(voiced_labels)
+
+    i = 0
+    while True:
+        assert os.path.isfile('/vad/vadnet/config.yml')
+
+
 
 # test_windows_extractor_one_trsansaction()
 # test_windows_extractor_2_overlapped_ransactions()
-print_res()
+# print_res()
+test_vad_CNN()
