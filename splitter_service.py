@@ -85,7 +85,10 @@ class SplitterAMQPService:
 
         # Init VAD nn service
         vad_batch_size = config['vad_batch_size']
-        self.__vad_manager = vad_extract.CNNNetVadExecutor(vad_batch_size)
+        vad_model_path = config['vad_model']
+        self.__vad_manager = vad_extract.CNNNetVadExecutor(vad_batch_size, vad_model_path)
+
+        self.__temp_files = []
 
     def __init_logger(self):
         logging.getLogger('pika').setLevel(logging.WARNING)
@@ -93,10 +96,10 @@ class SplitterAMQPService:
         self.__logger = logging.getLogger()
         self.__logger.setLevel(logging.DEBUG)
         now = datetime.now()
-        logs_dir = './logs'
+        logs_dir = '/logs/'
         os.makedirs(logs_dir, exist_ok=True)
 
-        fh = logging.FileHandler(f'./logs/audio_splitter-{now.strftime("%Y%m%d")}.log')
+        fh = logging.FileHandler(f'{logs_dir}audio_splitter-{now.strftime("%Y%m%d")}.log')
         fh.setLevel(logging.DEBUG)
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
@@ -109,6 +112,11 @@ class SplitterAMQPService:
         self.__logger.addHandler(ch)
 
     def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
+        def cleanup_temp_files():
+            for file_path in self.__temp_files:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+
         # Load file from url
         long_file_name = get_file_name_from_url(file_url)
         question_mark_index = long_file_name.find('?')
@@ -119,6 +127,7 @@ class SplitterAMQPService:
             self.__logger.debug(f'TRY: Save initial file to {long_file_path}')
             upload_and_save_file(file_url, long_file_path)
             self.__logger.debug(f'SUCCESS: Initial file saved to {long_file_path}')
+            self.__temp_files.append(long_file_path)
 
         # Convert file to wav extension
         target_sample_rate = 44100
@@ -137,13 +146,14 @@ class SplitterAMQPService:
             logging.debug(stderr.decode('utf-8'))
             assert os.path.isfile(wav_file_path)
             self.__logger.debug(f'SUCCESS: Convert initial mp3 file to wav extension')
+            self.__temp_files.append(wav_file_path)
 
         seconds_stamps = self.__vad_manager.extract_voice(wav_file_path)
 
         # Initially we have a list of datetime values for transactions info
         # Need to transform it to relative timestamps
         time_windows = []
-        if not (self.__vad_labels_only):
+        if not self.__vad_labels_only:
             end_timestamps_list = []
             if end_datetime_list is not None and len(end_datetime_list) > 0:
                 file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
@@ -157,6 +167,7 @@ class SplitterAMQPService:
         res = {}
         res['Tokens'] = time_windows
         res['SecondsVADLabels'] = seconds_stamps.tolist()
+        cleanup_temp_files()
         return res
 
     def __handle_delivery(self, channel, method_frame, header_frame, body):

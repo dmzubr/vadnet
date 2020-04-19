@@ -7,10 +7,16 @@ Copyright (C) University of Augsburg, Lab for Human Centered Multimedia
 Returns energy of a signal (dimensionwise or overall)
 '''
 
+# https://stackoverflow.com/questions/35911252/disable-tensorflow-debugging-information
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import os, json, glob
 import logging
 
 import tensorflow as tf
+tf.logging.set_verbosity(tf.logging.INFO)
+
 import numpy as np
 import librosa as lr
 import subprocess
@@ -19,20 +25,21 @@ import pickle
 from multiprocessing import Pool
 
 
-def exec(file_path, cnn_batch_size):
-    vadnet = CNNNetVAD(cnn_batch_size)
+def exec(file_path, cnn_batch_size, vad_model_path):
+    vadnet = CNNNetVAD(cnn_batch_size, vad_model_path)
     vadnet.process(file_path)
 
 
 class CNNNetVadExecutor:
-    def __init__(self, cnn_batch_size):
+    def __init__(self, cnn_batch_size, vad_model_path: str=''):
         self.__cnn_batch_size = cnn_batch_size
+        self.__vad_model_path = vad_model_path
         pass
 
     def extract_voice(self, file_path):
         # https://github.com/tensorflow/tensorflow/issues/17048#issuecomment-368082470
         with Pool(1) as p:
-            p.apply(exec, args=(file_path, self.__cnn_batch_size))
+            p.apply(exec, args=(file_path, self.__cnn_batch_size, self.__vad_model_path))
 
         assert os.path.isfile('vad_response.pickle')
         with open('vad_response.pickle', 'rb') as res_file_handle:
@@ -48,14 +55,15 @@ class CNNNetVAD:
         self.batch_size = batch_size
 
         if len(model_path) == 0:
-            model_path = '/root/vad_service/models/vad'
-            if os.path.isdir(model_path):
-                candidates = glob.glob(os.path.join(model_path, 'model.ckpt-*.meta'))
-                if candidates:
-                    candidates.sort()
-                    checkpoint_path, _ = os.path.splitext(candidates[-1])
-            else:
-                checkpoint_path = model_path
+            model_path = '/app/models/vad'
+
+        if os.path.isdir(model_path):
+            candidates = glob.glob(os.path.join(model_path, 'model.ckpt-*.meta'))
+            if candidates:
+                candidates.sort()
+                checkpoint_path, _ = os.path.splitext(candidates[-1])
+        else:
+            checkpoint_path = model_path
 
         self.__checkpoint_path = checkpoint_path
         self.logger.info(f'Model path is:  {checkpoint_path}')

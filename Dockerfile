@@ -11,7 +11,7 @@ RUN apt update
 RUN apt install -y ffmpeg libsndfile1 sox libsox-fmt-all
 RUN pip install librosa pyyaml pika requests pydub
 
-RUN mkdir /root/vad_service
-COPY . /root/vad_service
+WORKDIR /app
+COPY . /app
 
-# ENTRYPOINT ["python", "/root/vad_service/splitter_service.py"]
+ENTRYPOINT ["python", "/app/splitter_service.py"]
