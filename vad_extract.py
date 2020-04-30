@@ -21,8 +21,10 @@ import numpy as np
 import librosa as lr
 import subprocess
 import pickle
+import time
 
 from multiprocessing import Pool
+from gpu_state_check import is_gpu_busy
 
 
 def exec(file_path, cnn_batch_size, vad_model_path):
@@ -34,12 +36,22 @@ class CNNNetVadExecutor:
     def __init__(self, cnn_batch_size, vad_model_path: str=''):
         self.__cnn_batch_size = cnn_batch_size
         self.__vad_model_path = vad_model_path
-        pass
+        self.__run_state = False
+        self.logger = logging.getLogger()
 
     def extract_voice(self, file_path):
+        # First - check that GPU is not busy
+        self.logger.debug('Check that GPU memory is available for computing')
+        while is_gpu_busy() or self.__run_state:
+            wait_seconds = 1
+            time.sleep(wait_seconds)
+        self.logger.debug('GPU is ready for work with VAD')
+
         # https://github.com/tensorflow/tensorflow/issues/17048#issuecomment-368082470
         with Pool(1) as p:
+            self.__run_state = True
             p.apply(exec, args=(file_path, self.__cnn_batch_size, self.__vad_model_path))
+            self.__run_state = False
 
         assert os.path.isfile('vad_response.pickle')
         with open('vad_response.pickle', 'rb') as res_file_handle:

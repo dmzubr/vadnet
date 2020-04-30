@@ -92,6 +92,7 @@ class SplitterAMQPService:
 
     def __init_logger(self):
         logging.getLogger('pika').setLevel(logging.WARNING)
+        logging.getLogger('tf').setLevel(logging.INFO)
 
         self.__logger = logging.getLogger()
         self.__logger.setLevel(logging.DEBUG)
@@ -99,8 +100,8 @@ class SplitterAMQPService:
         logs_dir = '/logs/'
         os.makedirs(logs_dir, exist_ok=True)
 
-        fh = logging.FileHandler(f'{logs_dir}audio_splitter-{now.strftime("%Y%m%d")}.log')
-        fh.setLevel(logging.DEBUG)
+        fh = logging.FileHandler(f'{logs_dir}vad-{now.strftime("%Y%m%d")}.log')
+        fh.setLevel(logging.INFO)
         ch = logging.StreamHandler()
         ch.setLevel(logging.INFO)
 
@@ -110,6 +111,7 @@ class SplitterAMQPService:
 
         self.__logger.addHandler(fh)
         self.__logger.addHandler(ch)
+        self.__logger.info('Logger is initialised')
 
     def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
         def cleanup_temp_files():
@@ -124,9 +126,9 @@ class SplitterAMQPService:
             long_file_name = long_file_name[0:question_mark_index]
         long_file_path = os.path.join(tempfile.gettempdir(), long_file_name)
         if not os.path.exists(long_file_path):
-            self.__logger.debug(f'TRY: Save initial file to {long_file_path}')
+            self.__logger.info(f'TRY: Save initial file to {long_file_path}')
             upload_and_save_file(file_url, long_file_path)
-            self.__logger.debug(f'SUCCESS: Initial file saved to {long_file_path}')
+            self.__logger.info(f'SUCCESS: Initial file saved to {long_file_path}')
             self.__temp_files.append(long_file_path)
 
         # Convert file to wav extension
@@ -134,7 +136,7 @@ class SplitterAMQPService:
         wav_file_name = get_file_name_from_path(long_file_path).replace('.mp3', '.wav')
         wav_file_path = os.path.join(tempfile.gettempdir(), wav_file_name)
         if not os.path.isfile(wav_file_path):
-            self.__logger.debug(
+            self.__logger.info(
                 f'TRY: Convert initial mp3 file to wav extension ("{long_file_path}" -> "{wav_file_path}")')
             process = subprocess.Popen(["sox",
                                         long_file_path,
@@ -145,7 +147,7 @@ class SplitterAMQPService:
             logging.debug(stdout.decode('utf-8'))
             logging.debug(stderr.decode('utf-8'))
             assert os.path.isfile(wav_file_path)
-            self.__logger.debug(f'SUCCESS: Convert initial mp3 file to wav extension')
+            self.__logger.info(f'SUCCESS: Convert initial mp3 file to wav extension')
             self.__temp_files.append(wav_file_path)
 
         seconds_stamps = self.__vad_manager.extract_voice(wav_file_path)
@@ -201,7 +203,7 @@ class SplitterAMQPService:
 
     def run_listener(self):
         try:
-            self.__logger.debug(f'Connecting to AMQP server with username {self.__user_name}')
+            self.__logger.info(f'Connecting to AMQP server with username {self.__user_name}')
             credentials = pika.PlainCredentials(self.__user_name, self.__password)
             parameters = pika.ConnectionParameters(host=self.__amqp_host, port=self.__amqp_port,  credentials=credentials)
             connection = pika.BlockingConnection(parameters)
@@ -214,7 +216,7 @@ class SplitterAMQPService:
             self.__logger.debug(f'Exchange is "{self.__exchange_name}". Queue is "{self.__in_queue_name}'"")
             self.__channel.basic_consume(queue=self.__in_queue_name, on_message_callback=self.__handle_delivery)
 
-            self.__logger.debug(f'Activate blocking listening for queue {self.__in_queue_name}')
+            self.__logger.info(f'Activate blocking listening for queue {self.__in_queue_name}')
             self.__channel.start_consuming()
         except KeyboardInterrupt:
             self.__channel.stop_consuming()
