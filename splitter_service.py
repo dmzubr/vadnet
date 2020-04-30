@@ -1,61 +1,17 @@
-import ntpath
 import os
 import traceback
-import subprocess
-import requests
-import tempfile
 from datetime import datetime
 import logging
 import pika
 import json
 import yaml
-from windows_extractor import get_windows_from_annotated_data
-import vad_extract
+
+from message_handler import VADMEssageHandler
 
 # For DEBUG purpose
 import sys
 import numpy
 numpy.set_printoptions(threshold=sys.maxsize)
-
-
-
-class Window(object):
-    def __init__(self, start, end, frames):
-        self.start = start
-        self.end = end
-        self.frames = frames
-
-
-def get_file_name_from_url(url):
-    res = url.rsplit('/', 1)[1]
-    return res
-
-
-def get_file_extension_from_url(url):
-    file_name = get_file_name_from_url(url)
-    res = file_name.rsplit('.', 1)[1]
-    return res
-
-
-def get_file_name_from_path(path):
-    head, tail = ntpath.split(path)
-    return tail or ntpath.basename(head)
-
-
-def get_dir_path_from_file_path(path):
-    head, tail = ntpath.split(path)
-    return head
-
-
-def upload_and_save_file(file_url, out_file_path):
-    r = requests.get(file_url, allow_redirects=True)
-    open(out_file_path, 'wb').write(r.content)
-
-
-class TimeWindow:
-    def __init__(self, start_milliseconds, end_milliseconds):
-        self.StartMilliseconds = start_milliseconds
-        self.EndMilliseconds = end_milliseconds
 
 
 class SplitterAMQPService:
@@ -81,14 +37,7 @@ class SplitterAMQPService:
         self.__user_name = config['user_name']
         self.__password = config['password']
 
-        self.__vad_labels_only = config['vad_labels_only']
-
-        # Init VAD nn service
-        vad_batch_size = config['vad_batch_size']
-        vad_model_path = config['vad_model']
-        self.__vad_manager = vad_extract.CNNNetVadExecutor(vad_batch_size, vad_model_path)
-
-        self.__temp_files = []
+        self.__response_object_provider = VADMEssageHandler(config_file_path)
 
     def __init_logger(self):
         logging.getLogger('pika').setLevel(logging.WARNING)
@@ -113,65 +62,6 @@ class SplitterAMQPService:
         self.__logger.addHandler(ch)
         self.__logger.info('Logger is initialised')
 
-    def __get_file_tokens(self, start_timestamps_list, end_datetime_list, file_url, file_absolute_time_start):
-        def cleanup_temp_files():
-            for file_path in self.__temp_files:
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-
-        # Load file from url
-        long_file_name = get_file_name_from_url(file_url)
-        question_mark_index = long_file_name.find('?')
-        if question_mark_index > -1:
-            long_file_name = long_file_name[0:question_mark_index]
-        long_file_path = os.path.join(tempfile.gettempdir(), long_file_name)
-        if not os.path.exists(long_file_path):
-            self.__logger.info(f'TRY: Save initial file to {long_file_path}')
-            upload_and_save_file(file_url, long_file_path)
-            self.__logger.info(f'SUCCESS: Initial file saved to {long_file_path}')
-            self.__temp_files.append(long_file_path)
-
-        # Convert file to wav extension
-        target_sample_rate = 44100
-        wav_file_name = get_file_name_from_path(long_file_path).replace('.mp3', '.wav')
-        wav_file_path = os.path.join(tempfile.gettempdir(), wav_file_name)
-        if not os.path.isfile(wav_file_path):
-            self.__logger.info(
-                f'TRY: Convert initial mp3 file to wav extension ("{long_file_path}" -> "{wav_file_path}")')
-            process = subprocess.Popen(["sox",
-                                        long_file_path,
-                                        '-r',
-                                        str(target_sample_rate),
-                                        wav_file_path], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = process.communicate()
-            logging.debug(stdout.decode('utf-8'))
-            logging.debug(stderr.decode('utf-8'))
-            assert os.path.isfile(wav_file_path)
-            self.__logger.info(f'SUCCESS: Convert initial mp3 file to wav extension')
-            self.__temp_files.append(wav_file_path)
-
-        seconds_stamps = self.__vad_manager.extract_voice(wav_file_path)
-
-        # Initially we have a list of datetime values for transactions info
-        # Need to transform it to relative timestamps
-        time_windows = []
-        if not self.__vad_labels_only:
-            end_timestamps_list = []
-            if end_datetime_list is not None and len(end_datetime_list) > 0:
-                file_absolute_time_start_dte = datetime.strptime(file_absolute_time_start, '%Y-%m-%dT%H:%M:%S')
-                for end_datetime_str in end_datetime_list:
-                    end_datetime = datetime.strptime(end_datetime_str, '%Y-%m-%dT%H:%M:%S')
-                    end_timestamp = end_datetime - file_absolute_time_start_dte
-                    end_timestamps_list.append(end_timestamp.total_seconds())
-
-                time_windows = get_windows_from_annotated_data(end_timestamps_list, seconds_stamps)
-
-        res = {}
-        res['Tokens'] = time_windows
-        res['SecondsVADLabels'] = seconds_stamps.tolist()
-        cleanup_temp_files()
-        return res
-
     def __handle_delivery(self, channel, method_frame, header_frame, body):
         body_str = body.decode('utf-8')
         self.__logger.info('Got new splitting request: ', body_str)
@@ -179,11 +69,8 @@ class SplitterAMQPService:
         self.__channel.basic_ack(delivery_tag=method_frame.delivery_tag)
 
         try:
-            res_obj = self.__get_file_tokens(
-                start_timestamps_list=req['StartTimeStampsList'],
-                end_datetime_list=req['EndTimeStampsList'],
-                file_url=req['FileUrl'],
-                file_absolute_time_start=req['FileAbsoluteStartDate'])
+            # -------------- Call main business logic here
+            res_obj = self.__response_object_provider.get_vad_response_obj(req)
             self.__push_message(header_frame.reply_to, header_frame.correlation_id, res_obj)
         except Exception as exc:
             str_exc = str(exc)

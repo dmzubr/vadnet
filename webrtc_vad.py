@@ -1,8 +1,6 @@
 import collections
 import contextlib
-import sys
 import wave
-import re
 import os
 
 from pydub import AudioSegment
@@ -18,12 +16,17 @@ class Frame(object):
         self.duration = duration
 
 
-class Webrtcvad:
+class WebrtcvadWrapper:
     def __init__(self, share_voiced_samples_in_ring_buffer: float, frame_duration_ms,
-                 padding_duration_ms):
+                 padding_duration_ms, aggressiveness):
         self.__share_voiced_samples_in_ring_buffer = share_voiced_samples_in_ring_buffer
         self.__frame_duration_ms = frame_duration_ms
         self.__padding_duration_ms = padding_duration_ms
+        self.__aggressiveness = aggressiveness
+
+    @staticmethod
+    def __get_vad_available_sample_rates():
+        return [8000, 16000, 32000, 48000]
 
     def read_wave(self, path):
         """Reads a .wav file.
@@ -35,19 +38,9 @@ class Webrtcvad:
             sample_width = wf.getsampwidth()
             assert sample_width == 2
             sample_rate = wf.getframerate()
-            assert sample_rate in (8000, 16000, 32000, 48000)
+            assert sample_rate in self.__get_vad_available_sample_rates()
             pcm_data = wf.readframes(wf.getnframes())
             return pcm_data, sample_rate
-
-    def write_wave(self, path, audio, sample_rate):
-        """Writes a .wav file.
-        Takes path, PCM audio data, and sample rate.
-        """
-        with contextlib.closing(wave.open(path, 'wb')) as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(audio)
 
     def frame_generator(self, audio, sample_rate):
         """Generates audio frames from PCM audio data.
@@ -121,48 +114,86 @@ class Webrtcvad:
                 # unvoiced, then enter NOTTRIGGERED and yield whatever
                 # audio we've collected.
                 if num_unvoiced > self.__share_voiced_samples_in_ring_buffer * ring_buffer.maxlen:
-                    # sys.stdout.write(' - %s' % round(float(frame.timestamp + frame.duration), 2))
                     triggered = False
-                    yield [[f.timestamp for f in voiced_frames][0], [f.timestamp for f in voiced_frames][-1] + frame.duration]
+                    pure_stamps = [f.timestamp for f in voiced_frames]
+                    yield [pure_stamps[0], pure_stamps[-1] + frame.duration]
 
                     ring_buffer.clear()
                     voiced_frames = []
-        # if triggered:
-        # sys.stdout.write(' - %s' % round(float(frame.timestamp + frame.duration), 2))
-        # sys.stdout.write('\n')
         # If we have any leftover voiced audio when we run out of input,
         # yield it.
         if voiced_frames:
-            yield [[f.timestamp for f in voiced_frames][0], [f.timestamp for f in voiced_frames][-1] + frame.duration]
+            pure_stamps = [f.timestamp for f in voiced_frames]
+            yield [pure_stamps[0], pure_stamps[-1] + frame.duration]
 
-    def audio_preparation(self, audio_file: str):
+    def prepare_audio(self, audio_file_path: str):
         """
         Create new file (if not wav), delete .mp3 and setting format, frame rate, channels parameters, sample width
         """
-        wav = AudioSegment.from_file(audio_file)
-        wav = wav.set_frame_rate(16000)
-        wav = wav.set_channels(1)
-        wav = wav.set_sample_width(2)
-        wav.export(re.sub(r'\.(mp3|wav)', '.wav', audio_file), format='wav')
-        if '.mp3' in audio_file:
-            os.remove(audio_file)
+        in_file_name = audio_file_path.replace('\\', '/').split('/')[-1]
+        in_file_ext = in_file_name.split('.')[-1]
+        target_audio_path = audio_file_path
+        audio_obj = AudioSegment.from_file(audio_file_path)
+        need_export = False
 
-        return os.path.realpath(re.sub(r'\.(mp3|wav)', '.wav', audio_file))
+        if in_file_ext != 'wav':
+            need_export = True
+        if audio_obj.frame_rate not in self.__get_vad_available_sample_rates():
+            # Set maximal available sample rate to avoid lost of quality
+            # In most cases in audio will be in 44100
+            audio_obj = audio_obj.set_frame_rate(self.__get_vad_available_sample_rates()[-1])
+            need_export = True
 
-    def main(self, args):
-        if len(args) != 2:
-            sys.stderr.write(
-                'Usage: example.py <aggressiveness> <path to wav file>\n')
-            sys.exit(1)
-        audio, sample_rate = self.read_wave(args[1])
-        vad = webrtcvad.Vad(int(args[0]))
+        if need_export:
+            target_audio_path = audio_file_path.replace(in_file_name, in_file_name.replace(in_file_ext, 'wav'))
+            audio_obj.export(target_audio_path, format='wav')
+            audio_file_path = target_audio_path
+
+        return target_audio_path
+
+    def get_vad_segments(self, audio_file_path: str):
+        assert os.path.isfile(audio_file_path)
+        prepared_file_path = self.prepare_audio(audio_file_path)
+        audio, sample_rate = self.read_wave(prepared_file_path)
+
+        vad = webrtcvad.Vad(self.__aggressiveness)
         frames = self.frame_generator(audio, sample_rate)
         frames = list(frames)
         segments = self.vad_collector(sample_rate, vad, frames)
-        for i, segment in enumerate(segments):
-            print(segment)
+        return list(segments)
+
+
+class VadSegmentsAdjuster:
+    def __init__(self):
+        pass
+
+    def get_adjusted_segments(self, initial_vad_segments, audio_dur_seconds, admissions=0.5, min_unvoiced_dur=1):
+        segments = initial_vad_segments
+        for segment in segments:
+            segment[0] -= admissions
+            if segment[0] < 0:
+                segment[0] = 0
+            segment[1] += admissions
+            if segment[1] > audio_dur_seconds:
+                segment[1] = audio_dur_seconds
+
+        i = 0
+        while i < len(segments):
+            j = i+1
+            if j < len(segments):
+                diff = segments[j][0] - segments[i][1]
+                if diff < min_unvoiced_dur:
+                    segments[i][1] = segments[j][1]
+                    del segments[j]
+                    continue
+            i += 1
+
+        return segments
 
 
 if __name__ == '__main__':
-    main = Webrtcvad(0.9, 30, 300)
-    main.main([3, 'speaker_c.wav'])
+    var_adjuster = VadSegmentsAdjuster()
+    initial_vad_segments = [[0.36, 2.10], [3.06, 4.11], [4.26, 5.33], [8.15, 8.33], [15.26, 16.33]]
+    changed_segments = var_adjuster.get_adjusted_segments(initial_vad_segments, audio_dur_seconds=16.5)
+    ref_res = [[0, 5.83], [7.65, 8.83], [14.76, 16.5]]
+    assert changed_segments == ref_res
