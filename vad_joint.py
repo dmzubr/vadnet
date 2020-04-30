@@ -2,10 +2,16 @@ from webrtc_vad_result_handler import Handler
 
 
 class VadJoint:
+    """
+    Combines the VAD results of webrtc and neural network
+    """
     def __init__(self):
         pass
 
     def conversion_vad_nn_result(self, timestamps_boolean: list):
+        """
+        Converts the VAD result of neural network to the form of the result webrtc VAD
+        """
         time_timestamps = []
         for i in range(len(timestamps_boolean)):
             if timestamps_boolean[i] == 1 and timestamps_boolean[i - 1] == 1 and i != 0:
@@ -16,6 +22,9 @@ class VadJoint:
         return time_timestamps
 
     def vad_joint(self, timestamps_nn: list, timestamps_webrtc: list):
+        """
+        Combines VAD results of webrtc and neural network on the principle of full outer join
+        """
         result_joint = []
         func_handler = Handler()
 

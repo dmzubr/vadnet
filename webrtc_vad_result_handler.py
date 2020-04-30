@@ -1,8 +1,14 @@
 class Handler:
+    """
+    Webrtc VAD result handler.
+    """
     def __init__(self):
         pass
 
     def lap(self, timestamps: list, lap_value):
+        """
+        Extends the timestamps values to the lap_value
+        """
         for i in range(len(timestamps)):
             if timestamps[i][0] - lap_value < 0:
                 timestamps[i][0] = 0
@@ -20,6 +26,10 @@ class Handler:
         return timestamps
 
     def glue_borders(self, timestamps: list, unvoiced_value):
+        """
+        Combines overlapping timestamps and those that fall under the condition:
+        left border interval right - right border interval left < unvoiced_value.
+        """
         if len(timestamps) > 1:
             for x in range(1, len(timestamps)):
                 if 0 <= x < len(timestamps):

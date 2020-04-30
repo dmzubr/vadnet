@@ -159,6 +159,7 @@ def conversion_str_to_float(in_list: list, out_list: list):
 
 
 def has_overlap(A_start, A_end, B_start, B_end):
+
     latest_start = max(A_start, B_start)
     earliest_end = min(A_end, B_end)
 
@@ -166,6 +167,9 @@ def has_overlap(A_start, A_end, B_start, B_end):
 
 
 def filter_timestamp_vad(manually: list, vad_heap: list, vad: list):
+    """
+    Filters vad timestamps intersecting with manual timestamps.
+    """
     for i in range(len(manually)):
         for j in range(len(vad_heap)):
             if has_overlap(manually[i][0], manually[i][1], vad_heap[j][0], vad_heap[j][1]):
@@ -176,6 +180,9 @@ def filter_timestamp_vad(manually: list, vad_heap: list, vad: list):
 
 
 def share_of_coincidence_vad(manually: list, vad: list):
+    """
+    Calculates the share of coincidence of the total time vad to manual time.
+    """
     manually_sum_time = 0
     vad_sum_time = 0
 
