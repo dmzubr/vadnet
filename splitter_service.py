@@ -89,29 +89,31 @@ class SplitterAMQPService:
         self.__channel.basic_publish(exchange=self.__exchange_name, routing_key=reply_to_key, body=body, properties=props)
 
     def run_listener(self):
-        try:
-            self.__logger.info(f'Connecting to AMQP server with username {self.__user_name}')
-            credentials = pika.PlainCredentials(self.__user_name, self.__password)
-            parameters = pika.ConnectionParameters(host=self.__amqp_host, port=self.__amqp_port,  credentials=credentials)
-            connection = pika.BlockingConnection(parameters)
+        while True:
+            try:
+                self.__logger.info(f'Connecting to AMQP server with username {self.__user_name}')
+                credentials = pika.PlainCredentials(self.__user_name, self.__password)
+                parameters = pika.ConnectionParameters(host=self.__amqp_host, port=self.__amqp_port,  credentials=credentials)
+                connection = pika.BlockingConnection(parameters)
 
-            self.__channel = connection.channel()
-            self.__logger.debug(f'Channel created top host {self.__amqp_host}')
+                self.__channel = connection.channel()
+                self.__logger.debug(f'Channel created top host {self.__amqp_host}')
 
-            self.__channel.queue_declare(queue=self.__in_queue_name, durable=True, exclusive=False, auto_delete=False)
-            self.__channel.queue_bind(queue=self.__in_queue_name, exchange=self.__exchange_name, routing_key=self.__in_queue_name)
-            self.__logger.debug(f'Exchange is "{self.__exchange_name}". Queue is "{self.__in_queue_name}'"")
-            self.__channel.basic_consume(queue=self.__in_queue_name, on_message_callback=self.__handle_delivery)
+                self.__channel.queue_declare(queue=self.__in_queue_name, durable=True, exclusive=False, auto_delete=False)
+                self.__channel.queue_bind(queue=self.__in_queue_name, exchange=self.__exchange_name, routing_key=self.__in_queue_name)
+                self.__logger.debug(f'Exchange is "{self.__exchange_name}". Queue is "{self.__in_queue_name}'"")
+                self.__channel.basic_consume(queue=self.__in_queue_name, on_message_callback=self.__handle_delivery)
 
-            self.__logger.info(f'Activate blocking listening for queue {self.__in_queue_name}')
-            self.__channel.start_consuming()
-        except KeyboardInterrupt:
-            self.__channel.stop_consuming()
-            connection.close()
-            connection.ioloop.stop()
-        except Exception as e:
-            self.__logger.error(e)
-            self.run_listener()
+                self.__logger.info(f'Activate blocking listening for queue {self.__in_queue_name}')
+                try:
+                    self.__channel.start_consuming()
+                except KeyboardInterrupt:
+                    self.__channel.stop_consuming()
+                    connection.close()
+                    connection.ioloop.stop()
+            except Exception as e:
+                self.__logger.error(e)
+                continue
 
 
 def main():
