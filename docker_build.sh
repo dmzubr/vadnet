@@ -1,2 +1,2 @@
-sudo docker build -t docker-repo.cashee.ru/vad-service-prod:latest -f ./Dockerfile .
-sudo docker push docker-repo.cashee.ru/vad-service-prod:latest
+sudo docker build -t cr.yandex/crpmg9qeitngo9ui36lc/vad-service-prod:latest -f ./Dockerfile .
+sudo docker push cr.yandex/crpmg9qeitngo9ui36lc/vad-service-prod:latest
