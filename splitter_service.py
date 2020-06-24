@@ -10,7 +10,6 @@ numpy.set_printoptions(threshold=sys.maxsize)
 
 
 def on_request(body):
-    print(body)
     body_str = body.decode('utf-8')
     request_body = json.loads(body_str)
 
